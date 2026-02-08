@@ -16,7 +16,7 @@ import {
 } from "@/context/prompt"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
-import { useParams } from "@solidjs/router"
+import { useNavigate, useParams } from "@solidjs/router"
 import { useSync } from "@/context/sync"
 import { useComments } from "@/context/comments"
 import { Button } from "@opencode-ai/ui/button"
@@ -46,6 +46,9 @@ import { PromptImageAttachments } from "./prompt-input/image-attachments"
 import { PromptDragOverlay } from "./prompt-input/drag-overlay"
 import { promptPlaceholder } from "./prompt-input/placeholder"
 import { ImagePreview } from "@opencode-ai/ui/image-preview"
+import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
+import { base64Encode } from "@opencode-ai/util/encode"
+import { getFilename } from "@opencode-ai/util/path"
 
 interface PromptInputProps {
   class?: string
@@ -99,6 +102,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const permission = usePermission()
   const language = useLanguage()
   const platform = usePlatform()
+  const navigate = useNavigate()
   let editorRef!: HTMLDivElement
   let fileInputRef!: HTMLInputElement
   let scrollRef!: HTMLDivElement
@@ -201,6 +205,32 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   const imageAttachments = createMemo(() =>
     prompt.current().filter((part): part is ImageAttachmentPart => part.type === "image"),
   )
+  const [checkout, setCheckout] = persisted(
+    Persist.global("prompt.checkout", ["prompt.checkout.v1"]),
+    createStore({
+      repo: "",
+      branch: {} as Record<string, string>,
+    }),
+  )
+  const projects = createMemo(() => layout.projects.list().filter((project) => project.vcs === "git"))
+  const repo = createMemo(() => {
+    const list = projects()
+    if (list.length === 0) return
+    const selected = list.find((project) => project.worktree === checkout.repo)
+    if (selected) return selected
+    return list.find((project) => project.worktree === sdk.directory) ?? list[0]
+  })
+  const repoDir = createMemo(() => repo()?.worktree ?? sdk.directory)
+  const canCheckout = createMemo(() => !params.id)
+  const [branch, setBranch] = createStore({
+    loading: false,
+    data: {
+      current: "",
+      default: "",
+      locals: [] as string[],
+      remotes: [] as string[],
+    },
+  })
 
   const [store, setStore] = createStore<{
     popover: "at" | "slash" | null
@@ -226,6 +256,74 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       example: language.t(EXAMPLES[store.placeholder]),
       t: (key, params) => language.t(key as Parameters<typeof language.t>[0], params as never),
     }),
+  )
+  const branchList = createMemo(() => {
+    const locals = branch.data.locals
+    const remotes = branch.data.remotes
+    return Array.from(new Set([...locals, ...remotes])).filter(Boolean)
+  })
+  const branchValue = createMemo(() => {
+    const value = checkout.branch[repoDir()]
+    if (!value) return undefined
+    if (!branchList().includes(value)) return undefined
+    return value
+  })
+  const branchPlaceholder = createMemo(() => {
+    if (branch.loading) return language.t("prompt.loading")
+    return branch.data.current || branch.data.default || language.t("common.default")
+  })
+
+  const loadBranches = async (dir: string) => {
+    if (!dir) return
+    setBranch("loading", true)
+    const client = createOpencodeClient({
+      baseUrl: sdk.url,
+      fetch: platform.fetch,
+      directory: dir,
+      throwOnError: true,
+    })
+    const result = await client.vcs
+      .branches()
+      .then((response) => response.data)
+      .catch(() => undefined)
+    if (repoDir() !== dir) return
+    if (!result) {
+      setBranch({
+        loading: false,
+        data: { current: "", default: "", locals: [], remotes: [] },
+      })
+      return
+    }
+    setBranch({
+      loading: false,
+      data: {
+        current: result.current ?? "",
+        default: result.default ?? "",
+        locals: result.locals ?? [],
+        remotes: result.remotes ?? [],
+      },
+    })
+  }
+
+  createEffect(() => {
+    const list = projects()
+    if (list.length === 0) return
+    if (!checkout.repo) {
+      setCheckout("repo", sdk.directory)
+      return
+    }
+    const exists = list.some((project) => project.worktree === checkout.repo)
+    if (exists) return
+    setCheckout("repo", sdk.directory)
+  })
+
+  createEffect(
+    on(
+      () => repoDir(),
+      (dir) => {
+        void loadBranches(dir)
+      },
+    ),
   )
 
   const MAX_HISTORY = 100
@@ -788,6 +886,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     setMode: (mode) => setStore("mode", mode),
     setPopover: (popover) => setStore("popover", popover),
     newSessionWorktree: props.newSessionWorktree,
+    newSessionRef: branchValue(),
     onNewSessionWorktreeReset: props.onNewSessionWorktreeReset,
     onSubmit: props.onSubmit,
   })
@@ -1026,6 +1125,41 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 </div>
               </Match>
               <Match when={store.mode === "normal"}>
+                <div class="flex items-center gap-2 min-w-0">
+                  <Icon name="folder" size="small" class="text-icon-base" />
+                  <Select
+                    options={projects()}
+                    current={repo()}
+                    value={(project) => project.worktree}
+                    label={(project) => project.name ?? getFilename(project.worktree)}
+                    onSelect={(project) => {
+                      if (!project) return
+                      setCheckout("repo", project.worktree)
+                      if (!canCheckout()) return
+                      if (project.worktree === sdk.directory) return
+                      layout.projects.open(project.worktree)
+                      navigate(`/${base64Encode(project.worktree)}/session`)
+                    }}
+                    class="max-w-[180px]"
+                    valueClass="truncate"
+                    variant="ghost"
+                    disabled={!canCheckout() || projects().length === 0}
+                  />
+                  <Icon name="branch" size="small" class="text-icon-base" />
+                  <Select
+                    options={branchList()}
+                    current={branchValue()}
+                    placeholder={branchPlaceholder()}
+                    onSelect={(value) => {
+                      if (!value) return
+                      setCheckout("branch", repoDir(), value)
+                    }}
+                    class="max-w-[180px]"
+                    valueClass="truncate"
+                    variant="ghost"
+                    disabled={!canCheckout() || branch.loading || branchList().length === 0}
+                  />
+                </div>
                 <TooltipKeybind
                   placement="top"
                   gutter={8}

@@ -315,6 +315,28 @@ export namespace Server {
           },
         )
         .get(
+          "/vcs/branches",
+          describeRoute({
+            summary: "List VCS branches",
+            description: "List local and remote git branches for the current project.",
+            operationId: "vcs.branches",
+            responses: {
+              200: {
+                description: "VCS branches",
+                content: {
+                  "application/json": {
+                    schema: resolver(Vcs.Branches),
+                  },
+                },
+              },
+            },
+          }),
+          async (c) => {
+            const branches = await Vcs.branches()
+            return c.json(branches)
+          },
+        )
+        .get(
           "/command",
           describeRoute({
             summary: "List commands",

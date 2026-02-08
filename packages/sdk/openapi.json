@@ -5540,6 +5540,40 @@
         ]
       }
     },
+    "/vcs/branches": {
+      "get": {
+        "operationId": "vcs.branches",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "List VCS branches",
+        "description": "List local and remote git branches for the current project.",
+        "responses": {
+          "200": {
+            "description": "VCS branches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VcsBranches"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.vcs.branches({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/command": {
       "get": {
         "operationId": "command.list",
@@ -10320,6 +10354,10 @@
           "name": {
             "type": "string"
           },
+          "ref": {
+            "description": "Git ref to checkout when creating the worktree (branch, tag, or commit)",
+            "type": "string"
+          },
           "startCommand": {
             "description": "Additional startup script to run after the project's start command",
             "type": "string"
@@ -10792,6 +10830,30 @@
           }
         },
         "required": ["branch"]
+      },
+      "VcsBranches": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "string"
+          },
+          "default": {
+            "type": "string"
+          },
+          "locals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remotes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["locals", "remotes"]
       },
       "Command": {
         "type": "object",
