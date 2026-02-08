@@ -47,6 +47,7 @@ export namespace Worktree {
   export const CreateInput = z
     .object({
       name: z.string().optional(),
+      ref: z.string().optional().describe("Git ref to checkout when creating the worktree (branch, tag, or commit)"),
       startCommand: z
         .string()
         .optional()
@@ -296,13 +297,38 @@ export namespace Worktree {
       throw new NotGitError({ message: "Worktrees are only supported for git projects" })
     }
 
+    const ref = input?.ref?.trim()
+    const target = ref || "HEAD"
+    const remotes = await $`git remote`
+      .quiet()
+      .nothrow()
+      .cwd(Instance.worktree)
+      .text()
+      .then((x) =>
+        x
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
+      )
+      .catch(() => [])
+    const remote = target.includes("/") ? target.split("/")[0] : ""
+    if (remote && remotes.includes(remote)) {
+      const name = target.slice(remote.length + 1)
+      if (name) {
+        const fetch = await $`git fetch ${remote} ${name}`.quiet().nothrow().cwd(Instance.worktree)
+        if (fetch.exitCode !== 0) {
+          throw new CreateFailedError({ message: errorText(fetch) || "Failed to fetch git ref" })
+        }
+      }
+    }
+
     const root = path.join(Global.Path.data, "worktree", Instance.project.id)
     await fs.mkdir(root, { recursive: true })
 
     const base = input?.name ? slug(input.name) : ""
     const info = await candidate(root, base || undefined)
 
-    const created = await $`git worktree add --no-checkout -b ${info.branch} ${info.directory}`
+    const created = await $`git worktree add --no-checkout -b ${info.branch} ${info.directory} ${target}`
       .quiet()
       .nothrow()
       .cwd(Instance.worktree)
@@ -316,7 +342,7 @@ export namespace Worktree {
     const extra = input?.startCommand?.trim()
     setTimeout(() => {
       const start = async () => {
-        const populated = await $`git reset --hard`.quiet().nothrow().cwd(info.directory)
+        const populated = await $`git reset --hard ${target}`.quiet().nothrow().cwd(info.directory)
         if (populated.exitCode !== 0) {
           const message = errorText(populated) || "Failed to populate worktree"
           log.error("worktree checkout failed", { directory: info.directory, message })

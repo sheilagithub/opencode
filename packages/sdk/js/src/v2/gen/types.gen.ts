@@ -1969,6 +1969,10 @@ export type Worktree = {
 export type WorktreeCreateInput = {
   name?: string
   /**
+   * Git ref to checkout when creating the worktree (branch, tag, or commit)
+   */
+  ref?: string
+  /**
    * Additional startup script to run after the project's start command
    */
   startCommand?: string
@@ -2134,6 +2138,13 @@ export type Path = {
 
 export type VcsInfo = {
   branch: string
+}
+
+export type VcsBranches = {
+  current?: string
+  default?: string
+  locals: Array<string>
+  remotes: Array<string>
 }
 
 export type Command = {
@@ -4839,6 +4850,24 @@ export type VcsGetResponses = {
 }
 
 export type VcsGetResponse = VcsGetResponses[keyof VcsGetResponses]
+
+export type VcsBranchesData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/vcs/branches"
+}
+
+export type VcsBranchesResponses = {
+  /**
+   * VCS branches
+   */
+  200: VcsBranches
+}
+
+export type VcsBranchesResponse = VcsBranchesResponses[keyof VcsBranchesResponses]
 
 export type CommandListData = {
   body?: never
