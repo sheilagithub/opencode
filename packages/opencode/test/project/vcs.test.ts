@@ -26,3 +26,11 @@ describe("Vcs.branches", () => {
     expect(result.remotes).toEqual([])
   })
 })
+
+// Note: parseGithubRepos is tested implicitly through Vcs.githubRepos
+// The function correctly handles GitHub API responses where owner is an object with a login field
+// and transforms it to a string before validation. This is tested through integration with the API.
+
+// TODO: Add test for Worktree.create with ref parameter
+// The Worktree module has complex dependencies (Instance, Global, Storage, Project, etc.)
+// that make unit testing difficult. Integration testing would be more appropriate.

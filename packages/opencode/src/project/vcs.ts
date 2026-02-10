@@ -159,7 +159,13 @@ export namespace Vcs {
     if (!Array.isArray(input)) return []
 
     return input.flatMap((item) => {
-      const result = GithubRepo.safeParse(item)
+      if (typeof item !== "object" || item === null) return []
+      const raw = { ...item } as Record<string, unknown>
+      // GitHub API returns owner as an object with a login field
+      if (typeof raw.owner === "object" && raw.owner !== null && "login" in raw.owner) {
+        raw.owner = (raw.owner as Record<string, unknown>).login
+      }
+      const result = GithubRepo.safeParse(raw)
       if (!result.success) return []
       return [result.data]
     })
@@ -242,15 +248,31 @@ export namespace Vcs {
   }
 
   export async function githubRepos(token: string) {
-    const response = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated&direction=desc", {
-      headers: githubHeaders(token),
-    })
-    if (!response.ok) {
-      throw new Error(`GitHub request failed with status ${response.status}`)
+    const allRepos: GithubRepo[] = []
+    let url: string | undefined = "https://api.github.com/user/repos?per_page=100&sort=updated&direction=desc"
+    const maxPages = 10
+    let page = 0
+
+    while (url && page < maxPages) {
+      page++
+      const response = await fetch(url, {
+        headers: githubHeaders(token),
+      })
+      if (!response.ok) {
+        throw new Error(`GitHub request failed with status ${response.status}`)
+      }
+
+      allRepos.push(...parseGithubRepos(await response.json()))
+
+      // Parse Link header for next page
+      const link = response.headers.get("link") ?? ""
+      const next = link.split(",").find((part) => part.includes('rel="next"'))
+      const match = next?.match(/<([^>]+)>/)
+      url = match?.[1]
     }
 
     return {
-      repos: parseGithubRepos(await response.json()),
+      repos: allRepos,
     }
   }
 
