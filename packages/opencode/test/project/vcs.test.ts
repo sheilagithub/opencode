@@ -26,3 +26,7 @@ describe("Vcs.branches", () => {
     expect(result.remotes).toEqual([])
   })
 })
+
+// Note: The Vcs module's GitHub API integration (parseGithubRepos and pagination logic)
+// is tested through integration tests with the actual API, which provides more realistic
+// validation than mocking the GitHub API response structure.
