@@ -388,8 +388,19 @@ export namespace Server {
               throw new HTTPException(400, { message: "GitHub account is not connected" })
             }
             const input = c.req.valid("json")
-            const result = await Vcs.githubClone(input, auth.key)
-            return c.json(result)
+            try {
+              const result = await Vcs.githubClone(input, auth.key)
+              return c.json(result)
+            } catch (err) {
+              if (err instanceof HTTPException) {
+                throw err
+              }
+              if (err instanceof NamedError) {
+                throw new HTTPException(400, { message: err.message })
+              }
+              Log.error("Failed to clone GitHub repository", err)
+              throw new HTTPException(400, { message: "Failed to clone GitHub repository" })
+            }
           },
         )
         .get(
