@@ -162,8 +162,9 @@ export namespace Vcs {
       if (typeof item !== "object" || item === null) return []
       const raw = { ...item } as Record<string, unknown>
       // GitHub API returns owner as an object with a login field
-      if (typeof raw.owner === "object" && raw.owner !== null && "login" in raw.owner) {
-        raw.owner = (raw.owner as Record<string, unknown>).login
+      const owner = raw.owner
+      if (typeof owner === "object" && owner !== null && "login" in owner) {
+        raw.owner = (owner as Record<string, unknown>).login
       }
       const result = GithubRepo.safeParse(raw)
       if (!result.success) return []
