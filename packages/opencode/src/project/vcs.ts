@@ -46,7 +46,14 @@ export namespace Vcs {
       id: z.number(),
       name: z.string(),
       full_name: z.string(),
-      owner: z.string(),
+      owner: z
+        .union([
+          z.string(),
+          z.object({
+            login: z.string(),
+          }),
+        ])
+        .transform((value) => (typeof value === "string" ? value : value.login)),
       private: z.boolean(),
       default_branch: z.string(),
       clone_url: z.string(),
