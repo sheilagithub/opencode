@@ -241,12 +241,25 @@ export namespace Vcs {
     }
   }
 
+  export class GithubRequestError extends Error {
+    status: number
+
+    constructor(status: number, message: string) {
+      super(message)
+      this.name = "GithubRequestError"
+      this.status = status
+    }
+  }
+
   export async function githubRepos(token: string) {
     const response = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated&direction=desc", {
       headers: githubHeaders(token),
     })
     if (!response.ok) {
-      throw new Error(`GitHub request failed with status ${response.status}`)
+      throw new GithubRequestError(
+        response.status,
+        `GitHub request to /user/repos failed with status ${response.status}`,
+      )
     }
 
     return {
