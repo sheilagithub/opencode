@@ -274,17 +274,28 @@ export namespace Vcs {
 
     await fs.mkdir(parent, { recursive: true })
 
-    const auth = `https://x-access-token:${encodeURIComponent(token)}@github.com/${input.full_name}.git`
+    const trimmedToken = token.trim()
+    const repoUrl = `https://github.com/${input.full_name}.git`
+    const authHeader = `Authorization: Bearer ${trimmedToken}`
     const branch = input.branch?.trim()
-    const clone = branch
-      ? await $`git clone --branch ${branch} --single-branch ${auth} ${target}`.quiet().nothrow()
-      : await $`git clone ${auth} ${target}`.quiet().nothrow()
+    const clone =
+      branch
+        ? await $`git -c http.extraHeader=${authHeader} clone --branch ${branch} --single-branch ${repoUrl} ${target}`
+            .quiet()
+            .nothrow()
+        : await $`git -c http.extraHeader=${authHeader} clone ${repoUrl} ${target}`.quiet().nothrow()
 
     if (clone.exitCode !== 0) {
       const stderr = new TextDecoder().decode(clone.stderr).trim()
       const stdout = new TextDecoder().decode(clone.stdout).trim()
       const message = stderr || stdout || "Failed to clone GitHub repo"
-      throw new Error(message)
+      const escapeRegExp = (value: string) =>
+        value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      const redactedMessage =
+        trimmedToken.length > 0
+          ? message.replace(new RegExp(escapeRegExp(trimmedToken), "g"), "[REDACTED]")
+          : message
+      throw new Error(redactedMessage)
     }
 
     await $`git remote set-url origin https://github.com/${input.full_name}.git`.quiet().nothrow().cwd(target)
