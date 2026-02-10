@@ -268,15 +268,21 @@ export namespace Vcs {
 
     await fs.mkdir(parent, { recursive: true })
 
-    const auth = `https://x-access-token:${encodeURIComponent(token)}@github.com/${input.full_name}.git`
+    const repoUrl = `https://github.com/${input.full_name}.git`
+    const authHeader = `Authorization: Bearer ${token}`
     const branch = input.branch?.trim()
     const clone = branch
-      ? await $`git clone --branch ${branch} --single-branch ${auth} ${target}`.quiet().nothrow()
-      : await $`git clone ${auth} ${target}`.quiet().nothrow()
+      ? await $`git -c http.extraHeader=${authHeader} clone --branch ${branch} --single-branch ${repoUrl} ${target}`.quiet().nothrow()
+      : await $`git -c http.extraHeader=${authHeader} clone ${repoUrl} ${target}`.quiet().nothrow()
 
     if (clone.exitCode !== 0) {
-      const stderr = new TextDecoder().decode(clone.stderr).trim()
-      const stdout = new TextDecoder().decode(clone.stdout).trim()
+      const decoder = new TextDecoder()
+      let stderr = decoder.decode(clone.stderr).trim()
+      let stdout = decoder.decode(clone.stdout).trim()
+
+      const redact = (text: string) => (text ? text.split(token).join("[REDACTED]") : text)
+      stderr = redact(stderr)
+      stdout = redact(stdout)
       const message = stderr || stdout || "Failed to clone GitHub repo"
       throw new Error(message)
     }
