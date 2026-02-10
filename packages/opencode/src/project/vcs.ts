@@ -297,7 +297,8 @@ export namespace Vcs {
           parts.push(`github-request-id=${githubRequestId}`)
         }
         if (bodyText) {
-          const snippet = bodyText.length > 500 ? `${bodyText.slice(0, 500)}...` : bodyText
+          const maxBodyLength = 500
+          const snippet = bodyText.length > maxBodyLength ? `${bodyText.slice(0, maxBodyLength)}...` : bodyText
           parts.push(`response body: ${snippet}`)
         }
 
