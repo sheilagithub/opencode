@@ -38,6 +38,7 @@ type PromptSubmitInput = {
   setMode: (mode: "normal" | "shell") => void
   setPopover: (popover: "at" | "slash" | null) => void
   newSessionWorktree?: string
+  newSessionRef?: string
   onNewSessionWorktreeReset?: () => void
   onSubmit?: () => void
 }
@@ -138,14 +139,20 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const projectDirectory = sdk.directory
     const isNewSession = !params.id
     const worktreeSelection = input.newSessionWorktree ?? "main"
+    const ref = input.newSessionRef?.trim()
+    const wantsRef = !!ref
 
     let sessionDirectory = projectDirectory
     let client = sdk.client
 
     if (isNewSession) {
-      if (worktreeSelection === "create") {
+      const needsWorktree = worktreeSelection === "create" || (worktreeSelection === "main" && wantsRef)
+      if (needsWorktree) {
         const createdWorktree = await client.worktree
-          .create({ directory: projectDirectory })
+          .create({
+            directory: projectDirectory,
+            worktreeCreateInput: ref ? { ref } : undefined,
+          })
           .then((x) => x.data)
           .catch((err) => {
             showToast({

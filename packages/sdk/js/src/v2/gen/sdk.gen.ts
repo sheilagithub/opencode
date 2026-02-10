@@ -162,7 +162,13 @@ import type {
   TuiSelectSessionResponses,
   TuiShowToastResponses,
   TuiSubmitPromptResponses,
+  VcsBranchesResponses,
   VcsGetResponses,
+  VcsGithubCloneErrors,
+  VcsGithubCloneInput,
+  VcsGithubCloneResponses,
+  VcsGithubReposErrors,
+  VcsGithubReposResponses,
   WorktreeCreateErrors,
   WorktreeCreateInput,
   WorktreeCreateResponses,
@@ -2990,6 +2996,62 @@ export class Path extends HeyApiClient {
   }
 }
 
+export class Github extends HeyApiClient {
+  /**
+   * List GitHub repositories
+   *
+   * List repositories available to the connected GitHub account.
+   */
+  public repos<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
+    return (options?.client ?? this.client).get<VcsGithubReposResponses, VcsGithubReposErrors, ThrowOnError>({
+      url: "/vcs/github/repos",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Clone GitHub repository
+   *
+   * Clone a repository from the connected GitHub account.
+   */
+  public clone<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      vcsGithubCloneInput?: VcsGithubCloneInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { key: "vcsGithubCloneInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<VcsGithubCloneResponses, VcsGithubCloneErrors, ThrowOnError>({
+      url: "/vcs/github/clone",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Vcs extends HeyApiClient {
   /**
    * Get VCS info
@@ -3008,6 +3070,30 @@ export class Vcs extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  /**
+   * List VCS branches
+   *
+   * List local and remote git branches for the current project.
+   */
+  public branches<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "directory" }] }])
+    return (options?.client ?? this.client).get<VcsBranchesResponses, unknown, ThrowOnError>({
+      url: "/vcs/branches",
+      ...options,
+      ...params,
+    })
+  }
+
+  private _github?: Github
+  get github(): Github {
+    return (this._github ??= new Github({ client: this.client }))
   }
 }
 

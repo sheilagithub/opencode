@@ -5540,6 +5540,137 @@
         ]
       }
     },
+    "/vcs/branches": {
+      "get": {
+        "operationId": "vcs.branches",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "List VCS branches",
+        "description": "List local and remote git branches for the current project.",
+        "responses": {
+          "200": {
+            "description": "VCS branches",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VcsBranches"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.vcs.branches({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/vcs/github/repos": {
+      "get": {
+        "operationId": "vcs.github.repos",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "List GitHub repositories",
+        "description": "List repositories available to the connected GitHub account.",
+        "responses": {
+          "200": {
+            "description": "GitHub repositories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VcsGithubRepos"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.vcs.github.repos({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/vcs/github/clone": {
+      "post": {
+        "operationId": "vcs.github.clone",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "directory",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "summary": "Clone GitHub repository",
+        "description": "Clone a repository from the connected GitHub account.",
+        "responses": {
+          "200": {
+            "description": "Clone result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VcsGithubCloneResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VcsGithubCloneInput"
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.vcs.github.clone({\n  ...\n})"
+          }
+        ]
+      }
+    },
     "/command": {
       "get": {
         "operationId": "command.list",
@@ -10320,6 +10451,10 @@
           "name": {
             "type": "string"
           },
+          "ref": {
+            "description": "Git ref to checkout when creating the worktree (branch, tag, or commit)",
+            "type": "string"
+          },
           "startCommand": {
             "description": "Additional startup script to run after the project's start command",
             "type": "string"
@@ -10792,6 +10927,109 @@
           }
         },
         "required": ["branch"]
+      },
+      "VcsBranches": {
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "string"
+          },
+          "default": {
+            "type": "string"
+          },
+          "locals": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remotes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["locals", "remotes"]
+      },
+      "VcsGithubRepo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "default_branch": {
+            "type": "string"
+          },
+          "clone_url": {
+            "type": "string"
+          },
+          "html_url": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "full_name",
+          "owner",
+          "private",
+          "default_branch",
+          "clone_url",
+          "html_url",
+          "updated_at"
+        ]
+      },
+      "VcsGithubRepos": {
+        "type": "object",
+        "properties": {
+          "repos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VcsGithubRepo"
+            }
+          }
+        },
+        "required": ["repos"]
+      },
+      "VcsGithubCloneResult": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string"
+          }
+        },
+        "required": ["directory"]
+      },
+      "VcsGithubCloneInput": {
+        "type": "object",
+        "properties": {
+          "full_name": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "parent": {
+            "type": "string"
+          }
+        },
+        "required": ["full_name"]
       },
       "Command": {
         "type": "object",
