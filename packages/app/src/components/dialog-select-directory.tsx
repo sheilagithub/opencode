@@ -1,10 +1,17 @@
+import { Button } from "@opencode-ai/ui/button"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { FileIcon } from "@opencode-ai/ui/file-icon"
+import { Icon } from "@opencode-ai/ui/icon"
 import { List } from "@opencode-ai/ui/list"
+import { Spinner } from "@opencode-ai/ui/spinner"
+import { Tabs } from "@opencode-ai/ui/tabs"
+import { TextField } from "@opencode-ai/ui/text-field"
+import { showToast } from "@opencode-ai/ui/toast"
 import { getDirectory, getFilename } from "@opencode-ai/util/path"
 import fuzzysort from "fuzzysort"
-import { createMemo, createResource, createSignal } from "solid-js"
+import { createMemo, createResource, createSignal, For, Show } from "solid-js"
+import { createStore } from "solid-js/store"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLanguage } from "@/context/language"
@@ -28,6 +35,25 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
   const language = useLanguage()
 
   const [filter, setFilter] = createSignal("")
+  const [mode, setMode] = createSignal<"local" | "github">("local")
+  const [githubFilter, setGithubFilter] = createSignal("")
+  const [github, setGithub] = createStore({
+    token: "",
+    loading: false,
+    cloning: "",
+    error: "",
+    repos: [] as Array<{
+      id: number
+      name: string
+      full_name: string
+      owner: string
+      private: boolean
+      default_branch: string
+      clone_url: string
+      html_url: string
+      updated_at: string
+    }>,
+  })
 
   let list: ListRef | undefined
 
@@ -258,6 +284,89 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
     return results.map(row)
   }
 
+  const githubItems = createMemo(() => {
+    const query = githubFilter().trim().toLowerCase()
+    if (!query) return github.repos
+    return github.repos.filter(
+      (repo) => repo.full_name.toLowerCase().includes(query) || repo.name.toLowerCase().includes(query),
+    )
+  })
+
+  const loadGithubRepos = async () => {
+    setGithub("loading", true)
+    setGithub("error", "")
+    const result = await sdk.client.vcs.github
+      .repos()
+      .then((x) => x.data)
+      .catch((error) => {
+        setGithub("loading", false)
+        setGithub("repos", [])
+        setGithub("error", error instanceof Error ? error.message : "Failed to load repositories")
+        return undefined
+      })
+    if (!result) return
+    setGithub("loading", false)
+    setGithub("repos", result.repos)
+  }
+
+  const connectGithub = async () => {
+    const token = github.token.trim()
+    if (!token) {
+      setGithub("error", "Enter a GitHub personal access token")
+      return
+    }
+
+    setGithub("loading", true)
+    setGithub("error", "")
+    const saved = await sdk.client.auth
+      .set({
+        providerID: "github",
+        auth: {
+          type: "api",
+          key: token,
+        },
+      })
+      .then(() => true)
+      .catch((error) => {
+        setGithub("loading", false)
+        setGithub("error", error instanceof Error ? error.message : "Failed to connect GitHub")
+        return false
+      })
+
+    if (!saved) return
+
+    await loadGithubRepos()
+    showToast({
+      title: "Connected to GitHub",
+      description: "You can now browse and clone repositories.",
+      variant: "success",
+      icon: "circle-check",
+    })
+  }
+
+  const cloneGithub = async (full_name: string, branch?: string) => {
+    setGithub("cloning", full_name)
+    const result = await sdk.client.vcs.github
+      .clone({
+        vcsGithubCloneInput: {
+          full_name,
+          branch,
+          parent: home() || start(),
+        },
+      })
+      .then((x) => x.data)
+      .catch((error) => {
+        setGithub("cloning", "")
+        setGithub("error", error instanceof Error ? error.message : "Failed to clone repository")
+        return undefined
+      })
+    if (!result) return
+
+    setGithub("cloning", "")
+    props.onSelect(props.multiple ? [result.directory] : result.directory)
+    dialog.close()
+  }
+
   function resolve(absolute: string) {
     props.onSelect(props.multiple ? [absolute] : absolute)
     dialog.close()
@@ -265,62 +374,175 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
 
   return (
     <Dialog title={props.title ?? language.t("command.project.open")}>
-      <List
-        search={{ placeholder: language.t("dialog.directory.search.placeholder"), autofocus: true }}
-        emptyMessage={language.t("dialog.directory.empty")}
-        loadingMessage={language.t("common.loading")}
-        items={items}
-        key={(x) => x.absolute}
-        filterKeys={["search"]}
-        ref={(r) => (list = r)}
-        onFilter={(value) => setFilter(clean(value))}
-        onKeyEvent={(e, item) => {
-          if (e.key !== "Tab") return
-          if (e.shiftKey) return
-          if (!item) return
+      <Tabs value={mode()} onChange={(value) => setMode(value as "local" | "github")} class="px-2.5 pb-3">
+        <Tabs.List class="bg-background-strong rounded-lg p-1 mb-3 h-auto gap-1">
+          <Tabs.Trigger value="local" class="text-12-medium px-2 py-1 rounded-md">
+            <div class="flex items-center gap-1.5">
+              <Icon name="folder" size="small" />
+              <span>Local folders</span>
+            </div>
+          </Tabs.Trigger>
+          <Tabs.Trigger value="github" class="text-12-medium px-2 py-1 rounded-md">
+            <div class="flex items-center gap-1.5">
+              <Icon name="providers" size="small" />
+              <span>GitHub</span>
+            </div>
+          </Tabs.Trigger>
+        </Tabs.List>
 
-          e.preventDefault()
-          e.stopPropagation()
+        <Tabs.Content value="local">
+          <List
+            search={{ placeholder: language.t("dialog.directory.search.placeholder"), autofocus: true }}
+            emptyMessage={language.t("dialog.directory.empty")}
+            loadingMessage={language.t("common.loading")}
+            items={items}
+            key={(x) => x.absolute}
+            filterKeys={["search"]}
+            ref={(r) => (list = r)}
+            onFilter={(value) => setFilter(clean(value))}
+            onKeyEvent={(e, item) => {
+              if (e.key !== "Tab") return
+              if (e.shiftKey) return
+              if (!item) return
 
-          const value = display(item.absolute, filter())
-          list?.setFilter(value.endsWith("/") ? value : value + "/")
-        }}
-        onSelect={(path) => {
-          if (!path) return
-          resolve(path.absolute)
-        }}
-      >
-        {(item) => {
-          const path = display(item.absolute, filter())
-          if (path === "~") {
-            return (
-              <div class="w-full flex items-center justify-between rounded-md">
-                <div class="flex items-center gap-x-3 grow min-w-0">
-                  <FileIcon node={{ path: item.absolute, type: "directory" }} class="shrink-0 size-4" />
-                  <div class="flex items-center text-14-regular min-w-0">
-                    <span class="text-text-strong whitespace-nowrap">~</span>
-                    <span class="text-text-weak whitespace-nowrap">/</span>
+              e.preventDefault()
+              e.stopPropagation()
+
+              const value = display(item.absolute, filter())
+              list?.setFilter(value.endsWith("/") ? value : value + "/")
+            }}
+            onSelect={(path) => {
+              if (!path) return
+              resolve(path.absolute)
+            }}
+          >
+            {(item) => {
+              const path = display(item.absolute, filter())
+              if (path === "~") {
+                return (
+                  <div class="w-full flex items-center justify-between rounded-md">
+                    <div class="flex items-center gap-x-3 grow min-w-0">
+                      <FileIcon node={{ path: item.absolute, type: "directory" }} class="shrink-0 size-4" />
+                      <div class="flex items-center text-14-regular min-w-0">
+                        <span class="text-text-strong whitespace-nowrap">~</span>
+                        <span class="text-text-weak whitespace-nowrap">/</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
+              return (
+                <div class="w-full flex items-center justify-between rounded-md">
+                  <div class="flex items-center gap-x-3 grow min-w-0">
+                    <FileIcon node={{ path: item.absolute, type: "directory" }} class="shrink-0 size-4" />
+                    <div class="flex items-center text-14-regular min-w-0">
+                      <span class="text-text-weak whitespace-nowrap overflow-hidden overflow-ellipsis truncate min-w-0">
+                        {getDirectory(path)}
+                      </span>
+                      <span class="text-text-strong whitespace-nowrap">{getFilename(path)}</span>
+                      <span class="text-text-weak whitespace-nowrap">/</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )
-          }
-          return (
-            <div class="w-full flex items-center justify-between rounded-md">
-              <div class="flex items-center gap-x-3 grow min-w-0">
-                <FileIcon node={{ path: item.absolute, type: "directory" }} class="shrink-0 size-4" />
-                <div class="flex items-center text-14-regular min-w-0">
-                  <span class="text-text-weak whitespace-nowrap overflow-hidden overflow-ellipsis truncate min-w-0">
-                    {getDirectory(path)}
-                  </span>
-                  <span class="text-text-strong whitespace-nowrap">{getFilename(path)}</span>
-                  <span class="text-text-weak whitespace-nowrap">/</span>
-                </div>
-              </div>
+              )
+            }}
+          </List>
+        </Tabs.Content>
+
+        <Tabs.Content value="github">
+          <div class="flex flex-col gap-3">
+            <div class="text-12-regular text-text-weak">
+              Connect your GitHub account with a personal access token, then choose a repository to clone.
             </div>
-          )
-        }}
-      </List>
+            <form
+              class="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void connectGithub()
+              }}
+            >
+              <TextField
+                value={github.token}
+                onInput={(event) => setGithub("token", event.currentTarget.value)}
+                type="password"
+                placeholder="GitHub personal access token"
+                class="flex-1"
+              />
+              <Button type="submit" disabled={github.loading}>
+                <Show when={github.loading} fallback={<span>Connect</span>}>
+                  <Spinner />
+                </Show>
+              </Button>
+            </form>
+
+            <Show when={github.error}>
+              <div class="text-12-regular text-icon-critical-base">{github.error}</div>
+            </Show>
+
+            <div class="flex items-center gap-2">
+              <TextField
+                value={githubFilter()}
+                onInput={(event) => setGithubFilter(event.currentTarget.value)}
+                placeholder="Filter repositories"
+                class="flex-1"
+              />
+              <Button variant="secondary" size="small" onClick={() => void loadGithubRepos()} disabled={github.loading}>
+                Refresh
+              </Button>
+            </div>
+
+            <div class="max-h-72 overflow-auto border border-border-weak rounded-lg">
+              <Show
+                when={!github.loading}
+                fallback={
+                  <div class="p-3 flex items-center gap-2 text-12-regular">
+                    <Spinner /> Loading repositories...
+                  </div>
+                }
+              >
+                <Show
+                  when={githubItems().length > 0}
+                  fallback={
+                    <div class="p-3 text-12-regular text-text-weak">
+                      No repositories found. Connect GitHub and refresh.
+                    </div>
+                  }
+                >
+                  <div class="p-1 flex flex-col gap-1">
+                    <For each={githubItems()}>
+                      {(repo) => (
+                        <button
+                          type="button"
+                          class="w-full text-left rounded-md px-2.5 py-2 hover:bg-background-strong disabled:opacity-50"
+                          onClick={() => void cloneGithub(repo.full_name, repo.default_branch)}
+                          disabled={github.cloning === repo.full_name}
+                        >
+                          <div class="flex items-center justify-between gap-2">
+                            <div class="min-w-0">
+                              <div class="text-13-medium text-text-strong truncate">{repo.full_name}</div>
+                              <div class="text-11-regular text-text-weak flex items-center gap-2">
+                                <span>{repo.private ? "private" : "public"}</span>
+                                <span>•</span>
+                                <span>default: {repo.default_branch}</span>
+                              </div>
+                            </div>
+                            <Show
+                              when={github.cloning === repo.full_name}
+                              fallback={<Icon name="arrow-down-to-line" size="small" />}
+                            >
+                              <Spinner />
+                            </Show>
+                          </div>
+                        </button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </Show>
+            </div>
+          </div>
+        </Tabs.Content>
+      </Tabs>
     </Dialog>
   )
 }

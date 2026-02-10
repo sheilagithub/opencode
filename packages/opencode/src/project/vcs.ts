@@ -1,6 +1,7 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import { $ } from "bun"
+import fs from "fs/promises"
 import path from "path"
 import z from "zod"
 import { Log } from "@/util/log"
@@ -28,6 +29,71 @@ export namespace Vcs {
     })
   export type Info = z.infer<typeof Info>
 
+  export const Branches = z
+    .object({
+      current: z.string().optional(),
+      default: z.string().optional(),
+      locals: z.array(z.string()),
+      remotes: z.array(z.string()),
+    })
+    .meta({
+      ref: "VcsBranches",
+    })
+  export type Branches = z.infer<typeof Branches>
+
+  export const GithubRepo = z
+    .object({
+      id: z.number(),
+      name: z.string(),
+      full_name: z.string(),
+      owner: z
+        .union([
+          z.string(),
+          z.object({
+            login: z.string(),
+          }),
+        ])
+        .transform((value) => (typeof value === "string" ? value : value.login)),
+      private: z.boolean(),
+      default_branch: z.string(),
+      clone_url: z.string(),
+      html_url: z.string(),
+      updated_at: z.string(),
+    })
+    .meta({
+      ref: "VcsGithubRepo",
+    })
+  export type GithubRepo = z.infer<typeof GithubRepo>
+
+  export const GithubRepos = z
+    .object({
+      repos: z.array(GithubRepo),
+    })
+    .meta({
+      ref: "VcsGithubRepos",
+    })
+  export type GithubRepos = z.infer<typeof GithubRepos>
+
+  export const GithubCloneInput = z
+    .object({
+      full_name: z.string(),
+      branch: z.string().optional(),
+      parent: z.string().optional(),
+    })
+    .meta({
+      ref: "VcsGithubCloneInput",
+    })
+  export type GithubCloneInput = z.infer<typeof GithubCloneInput>
+
+  export const GithubCloneResult = z
+    .object({
+      directory: z.string(),
+    })
+    .meta({
+      ref: "VcsGithubCloneResult",
+    })
+  export type GithubCloneResult = z.infer<typeof GithubCloneResult>
+
   async function currentBranch() {
     return $`git rev-parse --abbrev-ref HEAD`
       .quiet()
@@ -36,6 +102,91 @@ export namespace Vcs {
       .text()
       .then((x) => x.trim())
       .catch(() => undefined)
+  }
+
+  function parseLines(input: string) {
+    return input
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+  }
+
+  async function listRemotes() {
+    return $`git remote`
+      .quiet()
+      .nothrow()
+      .cwd(Instance.worktree)
+      .text()
+      .then(parseLines)
+      .catch(() => [])
+  }
+
+  async function listRefs(kind: "heads" | "remotes") {
+    return $`git for-each-ref refs/${kind} --format=${"%(refname:short)"}`
+      .quiet()
+      .nothrow()
+      .cwd(Instance.worktree)
+      .text()
+      .then(parseLines)
+      .catch(() => [])
+  }
+
+  async function defaultBranch(remotes: string[]) {
+    const remote = remotes.includes("origin") ? "origin" : remotes.at(0)
+    if (remote) {
+      const ref = await $`git symbolic-ref refs/remotes/${remote}/HEAD`
+        .quiet()
+        .nothrow()
+        .cwd(Instance.worktree)
+        .text()
+        .then((x) => x.trim())
+        .catch(() => "")
+      if (ref) return ref.replace(`refs/remotes/${remote}/`, "")
+    }
+
+    const main = await $`git show-ref --verify --quiet refs/heads/main`.quiet().nothrow().cwd(Instance.worktree)
+    if (main.exitCode === 0) return "main"
+
+    const master = await $`git show-ref --verify --quiet refs/heads/master`.quiet().nothrow().cwd(Instance.worktree)
+    if (master.exitCode === 0) return "master"
+
+    return undefined
+  }
+
+  function githubHeaders(token: string) {
+    return {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "User-Agent": "opencode",
+      "X-GitHub-Api-Version": "2022-11-28",
+    }
+  }
+
+  function parseGithubRepos(input: unknown) {
+    if (!Array.isArray(input)) return []
+
+    return input.flatMap((item) => {
+      const result = GithubRepo.safeParse(item)
+      if (!result.success) return []
+      return [result.data]
+    })
+  }
+
+  async function candidate(parent: string, name: string) {
+    const base = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-") || "repo"
+    const existing = await fs
+      .readdir(parent, { withFileTypes: true })
+      .then((items) => new Set(items.filter((item) => item.isDirectory()).map((item) => item.name)))
+      .catch(() => new Set<string>())
+
+    if (!existing.has(base)) return path.join(parent, base)
+
+    for (const i of Array.from({ length: 100 }, (_, index) => index + 1)) {
+      const next = `${base}-${i}`
+      if (!existing.has(next)) return path.join(parent, next)
+    }
+
+    return path.join(parent, `${base}-${Date.now()}`)
   }
 
   const state = Instance.state(
@@ -72,5 +223,74 @@ export namespace Vcs {
 
   export async function branch() {
     return await state().then((s) => s.branch())
+  }
+
+  export async function branches() {
+    if (Instance.project.vcs !== "git") {
+      return {
+        current: undefined,
+        default: undefined,
+        locals: [],
+        remotes: [],
+      }
+    }
+
+    const current = await currentBranch()
+    const locals = await listRefs("heads")
+    const remotes = (await listRefs("remotes")).filter((name) => !name.endsWith("/HEAD"))
+    const defaultRef = await defaultBranch(await listRemotes())
+
+    return {
+      current: current || undefined,
+      default: defaultRef,
+      locals,
+      remotes,
+    }
+  }
+
+  export async function githubRepos(token: string) {
+    const response = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated&direction=desc", {
+      headers: githubHeaders(token),
+    })
+    if (!response.ok) {
+      throw new Error(`GitHub request failed with status ${response.status}`)
+    }
+
+    return {
+      repos: parseGithubRepos(await response.json()),
+    }
+  }
+
+  export async function githubClone(input: GithubCloneInput, token: string) {
+    const parent = input.parent?.trim() || process.cwd()
+    const name = input.full_name.split("/").at(1) || input.full_name
+    const target = await candidate(parent, name)
+
+    await fs.mkdir(parent, { recursive: true })
+
+    const repoUrl = `https://github.com/${input.full_name}.git`
+    const authHeader = `Authorization: Bearer ${token}`
+    const branch = input.branch?.trim()
+    const clone = branch
+      ? await $`git -c http.extraHeader=${authHeader} clone --branch ${branch} --single-branch ${repoUrl} ${target}`.quiet().nothrow()
+      : await $`git -c http.extraHeader=${authHeader} clone ${repoUrl} ${target}`.quiet().nothrow()
+
+    if (clone.exitCode !== 0) {
+      const decoder = new TextDecoder()
+      let stderr = decoder.decode(clone.stderr).trim()
+      let stdout = decoder.decode(clone.stdout).trim()
+
+      const redact = (text: string) => (text ? text.split(token).join("[REDACTED]") : text)
+      stderr = redact(stderr)
+      stdout = redact(stdout)
+      const message = stderr || stdout || "Failed to clone GitHub repo"
+      throw new Error(message)
+    }
+
+    await $`git remote set-url origin https://github.com/${input.full_name}.git`.quiet().nothrow().cwd(target)
+
+    return {
+      directory: target,
+    }
   }
 }

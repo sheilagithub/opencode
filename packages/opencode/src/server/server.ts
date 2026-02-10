@@ -315,6 +315,90 @@ export namespace Server {
           },
         )
         .get(
+          "/vcs/branches",
+          describeRoute({
+            summary: "List VCS branches",
+            description: "List local and remote git branches for the current project.",
+            operationId: "vcs.branches",
+            responses: {
+              200: {
+                description: "VCS branches",
+                content: {
+                  "application/json": {
+                    schema: resolver(Vcs.Branches),
+                  },
+                },
+              },
+            },
+          }),
+          async (c) => {
+            const branches = await Vcs.branches()
+            return c.json(branches)
+          },
+        )
+        .get(
+          "/vcs/github/repos",
+          describeRoute({
+            summary: "List GitHub repositories",
+            description: "List repositories available to the connected GitHub account.",
+            operationId: "vcs.github.repos",
+            responses: {
+              200: {
+                description: "GitHub repositories",
+                content: {
+                  "application/json": {
+                    schema: resolver(Vcs.GithubRepos),
+                  },
+                },
+              },
+              ...errors(400),
+            },
+          }),
+          async (c) => {
+            const auth = await Auth.get("github")
+            if (auth?.type !== "api") {
+              throw new HTTPException(400, { message: "GitHub account is not connected" })
+            }
+            const repos = await Vcs.githubRepos(auth.key)
+            return c.json(repos)
+          },
+        )
+        .post(
+          "/vcs/github/clone",
+          describeRoute({
+            summary: "Clone GitHub repository",
+            description: "Clone a repository from the connected GitHub account.",
+            operationId: "vcs.github.clone",
+            responses: {
+              200: {
+                description: "Clone result",
+                content: {
+                  "application/json": {
+                    schema: resolver(Vcs.GithubCloneResult),
+                  },
+                },
+              },
+              ...errors(400),
+            },
+          }),
+          validator("json", Vcs.GithubCloneInput),
+          async (c) => {
+            const auth = await Auth.get("github")
+            if (auth?.type !== "api") {
+              throw new HTTPException(400, { message: "GitHub account is not connected" })
+            }
+            const input = c.req.valid("json")
+            try {
+              const result = await Vcs.githubClone(input, auth.key)
+              return c.json(result)
+            } catch (err) {
+              // Avoid leaking any tokenized clone URL or stack trace to the client
+              Log.error("GitHub clone failed", err)
+              throw new HTTPException(400, { message: "Failed to clone GitHub repository" })
+            }
+          },
+        )
+        .get(
           "/command",
           describeRoute({
             summary: "List commands",

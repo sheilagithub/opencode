@@ -1969,6 +1969,10 @@ export type Worktree = {
 export type WorktreeCreateInput = {
   name?: string
   /**
+   * Git ref to checkout when creating the worktree (branch, tag, or commit)
+   */
+  ref?: string
+  /**
    * Additional startup script to run after the project's start command
    */
   startCommand?: string
@@ -2134,6 +2138,39 @@ export type Path = {
 
 export type VcsInfo = {
   branch: string
+}
+
+export type VcsBranches = {
+  current?: string
+  default?: string
+  locals: Array<string>
+  remotes: Array<string>
+}
+
+export type VcsGithubRepo = {
+  id: number
+  name: string
+  full_name: string
+  owner: string
+  private: boolean
+  default_branch: string
+  clone_url: string
+  html_url: string
+  updated_at: string
+}
+
+export type VcsGithubRepos = {
+  repos: Array<VcsGithubRepo>
+}
+
+export type VcsGithubCloneResult = {
+  directory: string
+}
+
+export type VcsGithubCloneInput = {
+  full_name: string
+  branch?: string
+  parent?: string
 }
 
 export type Command = {
@@ -4839,6 +4876,78 @@ export type VcsGetResponses = {
 }
 
 export type VcsGetResponse = VcsGetResponses[keyof VcsGetResponses]
+
+export type VcsBranchesData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/vcs/branches"
+}
+
+export type VcsBranchesResponses = {
+  /**
+   * VCS branches
+   */
+  200: VcsBranches
+}
+
+export type VcsBranchesResponse = VcsBranchesResponses[keyof VcsBranchesResponses]
+
+export type VcsGithubReposData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/vcs/github/repos"
+}
+
+export type VcsGithubReposErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type VcsGithubReposError = VcsGithubReposErrors[keyof VcsGithubReposErrors]
+
+export type VcsGithubReposResponses = {
+  /**
+   * GitHub repositories
+   */
+  200: VcsGithubRepos
+}
+
+export type VcsGithubReposResponse = VcsGithubReposResponses[keyof VcsGithubReposResponses]
+
+export type VcsGithubCloneData = {
+  body?: VcsGithubCloneInput
+  path?: never
+  query?: {
+    directory?: string
+  }
+  url: "/vcs/github/clone"
+}
+
+export type VcsGithubCloneErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type VcsGithubCloneError = VcsGithubCloneErrors[keyof VcsGithubCloneErrors]
+
+export type VcsGithubCloneResponses = {
+  /**
+   * Clone result
+   */
+  200: VcsGithubCloneResult
+}
+
+export type VcsGithubCloneResponse = VcsGithubCloneResponses[keyof VcsGithubCloneResponses]
 
 export type CommandListData = {
   body?: never
