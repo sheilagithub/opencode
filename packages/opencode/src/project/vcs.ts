@@ -158,11 +158,29 @@ export namespace Vcs {
   function parseGithubRepos(input: unknown) {
     if (!Array.isArray(input)) return []
 
-    return input.flatMap((item) => {
-      const result = GithubRepo.safeParse(item)
-      if (!result.success) return []
-      return [result.data]
+    const failed: string[] = []
+    const result = input.flatMap((item) => {
+      if (typeof item !== "object" || item === null) return []
+      const raw = { ...item } as Record<string, unknown>
+      // GitHub API returns owner as an object with a login field
+      const owner = raw.owner
+      if (typeof owner === "object" && owner !== null && "login" in owner) {
+        raw.owner = (owner as Record<string, unknown>).login
+      }
+      const parsed = GithubRepo.safeParse(raw)
+      if (!parsed.success) {
+        const repoName = typeof raw.full_name === "string" ? raw.full_name : "unknown"
+        failed.push(repoName)
+        return []
+      }
+      return [parsed.data]
     })
+
+    if (failed.length > 0) {
+      log.warn("repos dropped due to validation failure", { count: failed.length, repos: failed })
+    }
+
+    return result
   }
 
   async function candidate(parent: string, name: string) {
@@ -252,18 +270,66 @@ export namespace Vcs {
   }
 
   export async function githubRepos(token: string) {
-    const response = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated&direction=desc", {
-      headers: githubHeaders(token),
-    })
-    if (!response.ok) {
-      throw new GithubRequestError(
-        response.status,
-        `GitHub request to /user/repos failed with status ${response.status}`,
-      )
+    const allRepos: GithubRepo[] = []
+    let url: string | undefined = "https://api.github.com/user/repos?per_page=100&sort=updated&direction=desc"
+    const maxPages = 10
+    let page = 0
+
+    while (url && page < maxPages) {
+      page++
+      const response = await fetch(url, {
+        headers: githubHeaders(token),
+      })
+      if (!response.ok) {
+        const statusText = response.statusText
+        let bodyText: string | undefined
+        try {
+          bodyText = await response.text()
+        } catch {
+          // Ignore body parsing errors; we'll still report status and headers.
+        }
+
+        const rateLimitRemaining = response.headers.get("x-ratelimit-remaining")
+        const rateLimitReset = response.headers.get("x-ratelimit-reset")
+        const githubRequestId = response.headers.get("x-github-request-id")
+
+        const parts: string[] = []
+        parts.push(
+          `GitHub request failed with status ${response.status}${statusText ? ` ${statusText}` : ""}`,
+        )
+        if (rateLimitRemaining) {
+          parts.push(`rate-limit-remaining=${rateLimitRemaining}`)
+        }
+        if (rateLimitReset) {
+          parts.push(`rate-limit-reset=${rateLimitReset}`)
+        }
+        if (githubRequestId) {
+          parts.push(`github-request-id=${githubRequestId}`)
+        }
+        if (bodyText) {
+          const maxBodyLength = 500
+          const snippet = bodyText.length > maxBodyLength ? `${bodyText.slice(0, maxBodyLength)}...` : bodyText
+          parts.push(`response body: ${snippet}`)
+        }
+
+        throw new Error(parts.join("; "))
+      }
+
+      allRepos.push(...parseGithubRepos(await response.json()))
+
+      // Parse Link header for next page
+      const link = response.headers.get("link") ?? ""
+      const next = link.split(",").find((part) => part.includes('rel="next"'))
+      const match = next?.match(/<([^>]+)>/)
+      url = match?.[1]
+    }
+
+    if (url && page >= maxPages) {
+      log.warn("repo list truncated at pagination limit", { maxPages, totalFetched: allRepos.length })
     }
 
     return {
-      repos: parseGithubRepos(await response.json()),
+      repos: allRepos,
     }
   }
 
